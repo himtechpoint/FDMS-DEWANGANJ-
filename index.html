@@ -381,6 +381,12 @@ const CROPS = ['রোপা আমন', 'রোপা আউশ', 'বোরো
 const CROP_CUSTOM_VALUE = 'নিজে লিখুন';
 const MAX_CROP_SELECTIONS = 5;
 
+/* ---- Fallback crop limits (when Firebase settings/cropLimits is empty) ---- */
+const FALLBACK_CROP_LIMITS = [
+  { id: 'fallback_ropa', name: 'রোপা', kgPerBigha: 25, status: 'active', isFallback: true },
+  { id: 'fallback_sabji', name: 'সবজি', kgPerBigha: 25, status: 'active', isFallback: true }
+];
+
 // Fields whose Required/Optional state the Main Admin can configure at
 // runtime (stored at settings/formFields in the DB). Everything else
 // (farmerName, nid, mobile, union, fertilizer, quantity) stays permanently
@@ -435,8 +441,22 @@ async function ensureDefaultCrops() {
 function getActiveCropLimits() {
   return (state.cropLimits || []).filter(c => c.status !== 'disabled');
 }
+
+/* ---- Get effective crop limits with fallback safety ---- */
+function getEffectiveCropLimits() {
+  const active = getActiveCropLimits();
+  if (active && active.length > 0) {
+    return active;  // Firebase crops exist - use them
+  }
+  return FALLBACK_CROP_LIMITS;  // Fallback to default
+}
+
 function getCropLimitById(id) {
-  return (state.cropLimits || []).find(c => c.id === id) || null;
+  // Try Firebase crops first
+  const found = (state.cropLimits || []).find(c => c.id === id);
+  if (found) return found;
+  // Check fallback crops
+  return FALLBACK_CROP_LIMITS.find(c => c.id === id) || null;
 }
 async function getFarmerReceivedForCrop(nid, cropLimitId) {
   // Sum all distributions for this farmer+crop (any fertilizer)
@@ -1855,7 +1875,7 @@ function closeModal() {
 
 /* ---------------- distribution form + duplicate detection ---------------- */
 function renderDistributionForm() {
-  const activeCrops = getActiveCropLimits();
+  const activeCrops = getEffectiveCropLimits();
   const stockHtml = FERTILIZERS.map(f => {
     const qty = getDealerCurrentStock(f.v);
     return `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px;"><b>${esc(f.v)}:</b>&nbsp;${qty} কেজি</span>`;
@@ -2188,6 +2208,7 @@ async function handleDistributionSubmit(form) {
     applyLocalDashboardStats(newRecords);
     showToast(`সফলভাবে সংরক্ষণ করা হয়েছে (${items.length} টি সার)`, 'success');
     writeSystemLog('data_entry', 'distribution_created', `কৃষক: ${data.farmerName} | ${items.length} টি সার (${items.map(i => i.fertilizer).join(', ')})`);
+    // Immediate UI refresh
     renderCurrentView();
   } catch (e) {
     showToast('সংরক্ষণ করা যায়নি, নেটওয়ার্ক বা Firebase Rules চেক করুন', 'error');
